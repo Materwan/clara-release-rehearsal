@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "dompurify": "^3.4.17",
-    "katex": "^0.16.47",
+    "katex": "^0.19.1",
     "marked": "^16.4.2"
   }
 }
