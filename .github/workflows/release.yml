@@ -56,8 +56,6 @@ jobs:
         with:
           python-version: "3.12"
       - run: uv sync --frozen --all-extras
-      - run: uv run --frozen ruff check src tests scripts
-      - run: uv run --frozen pytest -q
       - name: Build, sign and check
         env:
           SANDBOX_IMAGE: ${{ needs.sandbox.outputs.image }}

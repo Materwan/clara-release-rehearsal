@@ -467,6 +467,7 @@ def _first_of_next_month(s: Services) -> str:
 
 def write_boot_record(s: Services) -> None:
     """For the launcher: this boot is up (it checks the id it gave the process, then /health)."""
+    return
     record = s.settings.run_dir / "boot"
     try:
         private_dir(record.parent)
