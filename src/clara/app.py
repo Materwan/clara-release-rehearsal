@@ -539,6 +539,7 @@ def main(argv: list[str] | None = None) -> int:
     setup_logging(settings.debug)
     try:
         db, lock = prepare(settings)
+        raise RuntimeError("rehearsal: deliberately broken release")
         services = build_services(settings, db)
     except StartError as error:
         log.error("%s", error)
