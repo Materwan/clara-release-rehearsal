@@ -84,7 +84,12 @@ class Upkeep:
                     await result
             except Exception:
                 log.exception("upkeep %s failed", name)
-            await asyncio.sleep(seconds)
+            left = seconds
+            while left > 0:  # in steps, so a loop that sleeps is not taken for one that is stuck
+                await asyncio.sleep(min(left, LOOP_STALL / 4))
+                left -= LOOP_STALL / 4
+                if watched:
+                    self.passes[name] = time.monotonic()
 
     # ------------------------------------------------------------------
     def approvals(self) -> None:

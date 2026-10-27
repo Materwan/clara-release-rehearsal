@@ -381,7 +381,8 @@ def create_app(s: Services) -> FastAPI:
         try:
             yield
         finally:
-            notify("STOPPING=1")
+            if os.environ.get("CLARA_LAUNCHED") != "1":  # the launcher is what systemd supervises, not this child
+                notify("STOPPING=1")
             for task in tasks:
                 task.cancel()
             await upkeep.stop()
