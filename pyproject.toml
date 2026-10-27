@@ -16,7 +16,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "cryptography>=43",      # AES-GCM secrets store, scrypt, Ed25519 release signatures, encrypted PDFs
     "pypdf>=5.0",            # text of PDF attachments and project files
-    "pillow>=11.0",          # frames of animated pictures sent to models
+    "pillow>=13.0.0",          # frames of animated pictures sent to models
     "prompt_toolkit>=3.0",   # clara-chat and clara-admin
 ]
 
