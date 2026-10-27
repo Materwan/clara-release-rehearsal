@@ -20,6 +20,6 @@
   "dependencies": {
     "dompurify": "^3.4.17",
     "katex": "^0.16.47",
-    "marked": "^16.4.2"
+    "marked": "^18.1.1"
   }
 }
