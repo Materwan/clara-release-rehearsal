@@ -71,7 +71,9 @@ def podman_args(
         "--env=HOME=/tmp",
         "--env=LANG=C.UTF-8",
         f"--volume={workspace}:/workspace:rw",
-        "--tmpfs=/workspace/.git:ro,size=64k,mode=000",
+        # notmpcopyup: podman would otherwise copy the host .git into this tmpfs, which fails ("crun: write: No space
+        # left on device") once that copy needs more than 64k, and would put the repository inside the container.
+        "--tmpfs=/workspace/.git:ro,size=64k,mode=000,notmpcopyup",
         "--tmpfs=/tmp:rw,size=256m",
         f"--workdir=/workspace/{workdir}".rstrip("/"),
         "--log-driver=none",
