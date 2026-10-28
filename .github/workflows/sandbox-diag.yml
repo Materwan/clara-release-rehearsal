@@ -1,0 +1,83 @@
+# Throwaway-repo diagnostic: why does the sandbox test fail with "crun: write: No space left on device"?
+# One job per removed option (each job deletes the matching lines from sandbox.py before running the test).
+name: Sandbox diagnostics
+
+on: workflow_dispatch
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    name: drop ${{ matrix.drop }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {drop: none-1, pattern: ""}
+          - {drop: none-2, pattern: ""}
+          - {drop: read-only, pattern: '"--read-only",'}
+          - {drop: pids-limit, pattern: '--pids-limit'}
+          - {drop: memory, pattern: '--memory'}
+          - {drop: cpus, pattern: '--cpus'}
+          - {drop: tmpfs-git, pattern: '--tmpfs=/workspace/.git'}
+          - {drop: tmpfs-tmp, pattern: '--tmpfs=/tmp'}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: Runner facts
+        run: |
+          set +e
+          echo '--- df -h'; df -h
+          echo '--- df -i'; df -i
+          echo '--- free -m'; free -m
+          echo '--- sysctl'; sysctl user.max_user_namespaces user.max_mnt_namespaces user.max_pid_namespaces
+          echo '--- /proc/self/cgroup'; cat /proc/self/cgroup
+          echo '--- cgroup.controllers'; cat /sys/fs/cgroup/cgroup.controllers
+          echo '--- id'; id
+          echo '--- podman info | head -40'; podman info | head -40
+      - run: podman build -t localhost/clara-sandbox:latest sandbox/
+      - run: uv sync --frozen --all-extras
+      - name: Remove the option under test
+        if: matrix.pattern != ''
+        env:
+          PATTERN: ${{ matrix.pattern }}
+        run: |
+          sed -i "\\#$PATTERN#d" src/clara/workspace/sandbox.py
+          git diff -U0 src/clara/workspace/sandbox.py
+      - name: The test, as CI runs it
+        env:
+          CLARA_REQUIRE_SANDBOX: "1"
+        run: uv run --frozen pytest -q tests/test_workspace.py -k "sees_no_network"
+      - name: Options added one at a time (podman run by hand, same flags as podman_args)
+        if: always() && startsWith(matrix.drop, 'none')
+        run: |
+          set +e
+          IMG=localhost/clara-sandbox:latest
+          mkdir -p "$PWD/ws/.git"
+          try() { echo "### $*"; timeout 120 podman run --rm --network=none --read-only --cap-drop=all "$@" $IMG bash -c 'echo ok' 2>&1 | head -5; echo "exit=${PIPESTATUS[0]}"; }
+          try
+          try --security-opt=no-new-privileges
+          try --userns=keep-id --user="$(id -u):$(id -g)"
+          try --pids-limit=256
+          try --memory=1g --memory-swap=1g
+          try --cpus=2
+          try --timeout=60
+          try --http-proxy=false --env=HOME=/tmp --env=LANG=C.UTF-8
+          try --volume="$PWD/ws:/workspace:rw"
+          try --tmpfs=/tmp:rw,size=256m
+          try --volume="$PWD/ws:/workspace:rw" --tmpfs=/workspace/.git:ro,size=64k,mode=000
+          try --log-driver=none
+          echo '### all of podman_args at once'
+          timeout 120 podman run --rm --network=none --read-only --cap-drop=all --security-opt=no-new-privileges \
+            --userns=keep-id --user="$(id -u):$(id -g)" --pids-limit=256 --memory=1g --memory-swap=1g --cpus=2 --timeout=60 \
+            --http-proxy=false --env=HOME=/tmp --env=LANG=C.UTF-8 --volume="$PWD/ws:/workspace:rw" \
+            --tmpfs=/workspace/.git:ro,size=64k,mode=000 --tmpfs=/tmp:rw,size=256m --workdir=/workspace --log-driver=none \
+            $IMG bash -c 'echo ok' 2>&1 | head -5
+          echo "exit=${PIPESTATUS[0]}"
+      - name: Kernel messages
+        if: always()
+        run: sudo dmesg | tail -30 || true
