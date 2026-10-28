@@ -32,7 +32,7 @@ jobs:
           digest=$(docker buildx imagetools inspect docker.io/library/python:3.12-slim --format '{{json .Manifest}}' | jq -r .digest)
           echo "base=docker.io/library/python:3.12-slim@${digest}" >> "$GITHUB_OUTPUT"
           echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/clara-sandbox" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         id: push
         with:
           context: sandbox
