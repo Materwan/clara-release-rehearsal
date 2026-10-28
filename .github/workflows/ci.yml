@@ -23,7 +23,7 @@ jobs:
       matrix:
         python: ["3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: ${{ matrix.python }}
@@ -35,7 +35,7 @@ jobs:
     name: Web site (svelte-check and build)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - run: scripts/build-web.sh
       - run: test -f src/clara/web/dist/index.html && test -f src/clara/web/dist/picker.html
 
@@ -43,7 +43,7 @@ jobs:
     name: Sandbox (rootless Podman)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
@@ -58,7 +58,7 @@ jobs:
     name: Release build (unsigned dry run)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
       - uses: astral-sh/setup-uv@v6
