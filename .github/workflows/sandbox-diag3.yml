@@ -1,0 +1,49 @@
+# Throwaway-repo diagnostic, round 3: is it tmpfs copy-up of the host .git into the 64 KiB tmpfs?
+name: Sandbox diagnostics 3
+
+on: workflow_dispatch
+
+permissions:
+  contents: read
+
+jobs:
+  copyup:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - run: podman build -t localhost/clara-sandbox:latest sandbox/
+      - name: Cases
+        run: |
+          set +e
+          podman version | head -3; crun --version | head -1; git --version
+          IMG=localhost/clara-sandbox:latest
+          GITTMPFS='--tmpfs=/workspace/.git:ro,size=64k,mode=000'
+          mkws() { rm -rf "$1"; mkdir -p "$1"; git -C "$1" init -q -b main; echo hi > "$1/a.txt"; git -C "$1" add -A; git -C "$1" -c user.name=x -c user.email=x@x commit -qm first; }
+          # run <label> <workspace> <tmpfs-arg> <command>
+          run() {
+            local label="$1" ws="$2" tmpfs="$3" cmd="$4"
+            echo "### $label"
+            timeout 120 podman run --rm --network=none --read-only --cap-drop=all --security-opt=no-new-privileges \
+              --userns=keep-id --user="$(id -u):$(id -g)" --pids-limit=256 --memory=1g --memory-swap=1g --cpus=2 --timeout=60 \
+              --http-proxy=false --env=HOME=/tmp --env=LANG=C.UTF-8 --volume="$ws:/workspace:rw" "$tmpfs" \
+              --tmpfs=/tmp:rw,size=256m --workdir=/workspace --log-driver=none $IMG bash -c "$cmd" > /tmp/out.txt 2>&1
+            local rc=$?; head -12 /tmp/out.txt; echo "exit=$rc"
+          }
+          mkws /tmp/w1
+          echo "w1 .git: $(du -sb /tmp/w1/.git | cut -f1) bytes apparent, $(du -s /tmp/w1/.git | cut -f1) KiB on disk, $(find /tmp/w1/.git | wc -l) entries"
+          run "1 recorded options, real git workspace" /tmp/w1 "$GITTMPFS" 'ls -a /workspace/.git | wc -l; echo done'
+          run "2 same + notmpcopyup" /tmp/w1 "$GITTMPFS,notmpcopyup" 'ls -a /workspace/.git | wc -l; echo done'
+          run "3 size=1m, mode=755: does the host .git show up inside the tmpfs?" /tmp/w1 '--tmpfs=/workspace/.git:ro,size=1m,mode=755' 'ls -A /workspace/.git | head -20; echo done'
+          run "4 same with notmpcopyup: .git must look empty" /tmp/w1 '--tmpfs=/workspace/.git:ro,size=1m,mode=755,notmpcopyup' 'ls -A /workspace/.git | head -20; echo done'
+          # synthetic .git folders of controlled content
+          mkdir -p /tmp/w2/.git /tmp/w3/.git /tmp/w4/.git /tmp/w5/.git
+          head -c 100000 /dev/zero > /tmp/w2/.git/big            # 1 file of 100 kB
+          head -c 10000 /dev/zero > /tmp/w3/.git/small           # 1 file of 10 kB
+          for i in $(seq 1 200); do : > /tmp/w4/.git/f$i; done  # 200 empty files
+          head -c 60000 /dev/zero > /tmp/w5/.git/almost          # 1 file of 60 kB
+          for w in 2 3 4 5; do run "5.$w synthetic .git ($(du -sb /tmp/w$w/.git | cut -f1) bytes), size=64k" /tmp/w$w "$GITTMPFS" 'echo started'; done
+          run "6 100 kB .git with notmpcopyup" /tmp/w2 "$GITTMPFS,notmpcopyup" 'echo started'
+          echo "### 7 does the fix keep the .git hidden and unwritable? (as the container user, real workspace)"
+          run "7a ls" /tmp/w1 "$GITTMPFS,notmpcopyup" 'ls -a /workspace/.git; echo "ls rc=$?"'
+          run "7b write" /tmp/w1 "$GITTMPFS,notmpcopyup" 'touch /workspace/.git/x; echo "touch rc=$?"; chmod 755 /workspace/.git; echo "chmod rc=$?"; cat /workspace/.git/config; echo "cat rc=$?"'
+          run "7c the workspace itself is still writable" /tmp/w1 "$GITTMPFS,notmpcopyup" 'touch made-here && echo wrote'
