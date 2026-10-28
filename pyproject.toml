@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "clara"
-version = "1.0.0"
+version = "1.0.0-rc15"
 description = "Clara: a personal AI agent for one person, on one Linux machine, reachable only over Tailscale"
 readme = "README.md"
 license = { text = "All rights reserved" }
