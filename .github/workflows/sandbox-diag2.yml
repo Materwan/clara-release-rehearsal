@@ -1,0 +1,75 @@
+# Throwaway-repo diagnostic, round 2: record the exact failing `podman run` of the test, then replay it with variations.
+name: Sandbox diagnostics 2
+
+on: workflow_dispatch
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: podman build -t localhost/clara-sandbox:latest sandbox/
+      - run: uv sync --frozen --all-extras
+      - name: A podman wrapper that records every `run` (NUL-separated argv) and keeps debug output
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          cat > "$RUNNER_TEMP/bin/podman" <<'EOF'
+          #!/bin/bash
+          if [[ "$1" == run ]]; then
+            printf '%s\0' podman "$@" > "/tmp/run.$$.args"
+            /usr/bin/podman --log-level=debug --runtime-flag=debug "$@" 2> >(tee -a /tmp/podman-debug.log >&2)
+            exit $?
+          fi
+          exec /usr/bin/podman "$@"
+          EOF
+          chmod +x "$RUNNER_TEMP/bin/podman"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: The test (expected to fail)
+        continue-on-error: true
+        env:
+          CLARA_REQUIRE_SANDBOX: "1"
+        run: uv run --frozen pytest -q tests/test_workspace.py -k "sees_no_network"
+      - name: What the test's run looked like
+        if: always()
+        run: |
+          set +e
+          ls -la /tmp/run.*.args
+          for f in /tmp/run.*.args; do echo "--- $f"; tr '\0' ' ' < "$f"; echo; done
+          echo '--- debug log (last 60 lines)'; tail -60 /tmp/podman-debug.log
+      - name: Replay with variations
+        if: always()
+        run: |
+          set +e
+          f=$(grep -la -- '--tmpfs=/workspace/.git' /tmp/run.*.args | head -1)
+          [ -n "$f" ] || { echo "no recorded run"; exit 1; }
+          mapfile -d '' ARGS < "$f"
+          WS=""
+          for a in "${ARGS[@]}"; do [[ $a == --volume=* ]] && WS=${a#--volume=} && WS=${WS%%:*}; done
+          echo "workspace: $WS"
+          echo '--- stat/du/find of the workspace .git'
+          stat -c '%a %U:%G %n' "$WS" "$WS/.git"; du -sb "$WS/.git"; find "$WS/.git" | head -30; find "$WS/.git" | wc -l
+          echo '--- /workspace and /workspace/.git in the image'
+          /usr/bin/podman run --rm localhost/clara-sandbox:latest bash -c 'ls -la /workspace /workspace/.git 2>&1; du -sb /workspace 2>&1'
+          replay() { # label, then sed-like pairs: from=to ; run the recorded argv with one argument replaced
+            local label="$1" from="$2" to="$3"; local A=("${ARGS[@]}"); local i
+            for i in "${!A[@]}"; do [[ ${A[i]} == "$from" ]] && A[i]="$to"; done
+            for i in "${!A[@]}"; do [[ ${A[i]} == --name ]] && A[i+1]="clara-replay-$RANDOM"; done
+            echo "### $label"; timeout 120 /usr/bin/podman "${A[@]:1}" 2>&1 | head -8; echo "exit=${PIPESTATUS[0]}"
+          }
+          T='--tmpfs=/workspace/.git:ro,size=64k,mode=000'
+          replay "as recorded" "$T" "$T"
+          replay "size=1m" "$T" '--tmpfs=/workspace/.git:ro,size=1m,mode=000'
+          replay "no mode" "$T" '--tmpfs=/workspace/.git:ro,size=64k'
+          replay "rw" "$T" '--tmpfs=/workspace/.git:rw,size=64k,mode=000'
+          replay "no size" "$T" '--tmpfs=/workspace/.git:ro,mode=000'
+          replay "tmpfs on a subfolder instead" "$T" '--tmpfs=/workspace/runs:ro,size=64k,mode=000'
+          mkdir -p /tmp/ws2/.git
+          V=$(printf '%s\n' "${ARGS[@]}" | grep -m1 '^--volume=')
+          replay "empty .git workspace" "$V" "--volume=/tmp/ws2:/workspace:rw"
+          echo '--- kernel'; sudo dmesg | tail -20
